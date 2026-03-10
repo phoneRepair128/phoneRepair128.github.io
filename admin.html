@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商店维修类型管理</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+  <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+  <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style scoped>
+    .avatar-uploader .el-upload {
+      border: 1px dashed #d99;
+      border-radius: 6px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .avatar-uploader .el-upload:hover {
+      border-color: #409eff;
+    }
+
+    .avatar-uploader-icon {
+      font-size: 28px;
+      color: #8c939d;
+      width: 178px;
+      height: 178px;
+      line-height: 178px;
+      text-align: center;
+    }
+
+    .avatar {
+      width: 178px;
+      height: 178px;
+      display: block;
+    }
+
+    /* 行内编辑/新增样式 */
+    .edit-cell {
+      padding: 0;
+    }
+
+    .edit-input {
+      width: 100%;
+      border: none;
+      outline: none;
+      padding: 5px;
+      box-sizing: border-box;
+    }
+
+    .new-row {
+      background-color: #f8f9fa;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div>
+      <div style="margin-bottom: 10px;">
+        <el-button type="primary" @click="addTopLevel">新增一级品牌</el-button>
+        <el-button type="danger" @click="deleteData()">删除</el-button>
+        <el-button type="danger" @click="pushGit()">提交到git</el-button>
+
+      </div>
+      <div class="tip"> 编辑完成之后，点击 提交到git 按钮，粘贴到编辑框，再点提交修改，完成数据修改</div>
+      <el-table :data="tableData" style="width: 100%" @selection-change="handleSelectionChange"
+        :tree-props="{children: 'children', hasChildren: 'hasChildren'}" row-key="id" ref="table">
+        <el-table-column type="selection" width="55"> </el-table-column>
+        <!-- 名称列 -->
+        <el-table-column prop="name" label="名称">
+          <template slot-scope="scope">
+            <div v-if="scope.row.editStatus" class="edit-cell">
+              <input v-model="scope.row.name" class="edit-input" @blur="saveEditOrAdd(scope.row)"
+                @keyup.enter="saveEditOrAdd(scope.row)" placeholder="请输入内容">
+            </div>
+            <div v-else @click="startEdit(scope.row)">{{ scope.row.name }}</div>
+          </template>
+        </el-table-column>
+        <!-- 价格列 -->
+        <el-table-column prop="price" label="价格">
+          <template slot-scope="scope">
+            <div v-if="scope.row.editStatus" class="edit-cell">
+              <input v-model="scope.row.price" class="edit-input" @blur="saveEditOrAdd(scope.row)"
+                @keyup.enter="saveEditOrAdd(scope.row)" type="number" placeholder="价格">
+            </div>
+            <div v-else @click="startEdit(scope.row)">{{ scope.row.price || '-' }}</div>
+          </template>
+        </el-table-column>
+        <!-- 排序号列 -->
+        <el-table-column prop="sort" label="排序号">
+          <template slot-scope="scope">
+            <span v-if="scope.row.editStatus">-</span>
+            <span v-else>{{ scope.row.sort || 0 }}</span>
+          </template>
+        </el-table-column>
+        <!-- 操作列 -->
+        <el-table-column label="操作" width="160">
+          <template slot-scope="scope">
+            <el-button v-if="scope.row.level ===1" type="text" size="small"
+              @click="addChild(scope.row)">新增型号</el-button>
+            <el-button v-if="scope.row.level ===2" type="text" size="small"
+              @click="addChild(scope.row)">新增项目</el-button>
+            <el-button type="text" size="small" @click="edit(scope.row)">编辑</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- <div style="margin-top:20px;">
+        同步后扁平数据：{{ JSON.stringify(rawDataResult) }}
+      </div> -->
+    </div>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          selectedRows: [],
+          tableData: [],
+          rawData: [],
+          rawDataResult: [],
+          idSeed: 1 // 自增ID
+        }
+      },
+      mounted() {
+        fetch('./data.json')
+          .then(res => res.json())
+          .then(data => {
+            this.rawData = data
+            this.buildTreeData()
+          }
+          )
+          //   this.rawData = [{
+          //   "brand": "Apple iPhone",
+          //   "model": "iPhone 8",
+          //   "issue": "Back Glass Replacement",
+          //   "price": "99",
+          //   "time": "30 minutes to 2 hours"
+          // },
+          // {
+          //   "brand": "Apple iPhone",
+          //   "model": "iPhone 8",
+          //   "issue": "Battery Replacement",
+          //   "price": "69",
+          //   "time": "20 - 40 minutes"
+          // },
+          // {
+          //   "brand": "Apple iPhone",
+          //   "model": "iPhone X",
+          //   "issue": "Screen Replacement",
+          //   "price": "199",
+          //   "time": "1 - 2 hours"
+          // },
+          // {
+          //   "brand": "Samsung",
+          //   "model": "Galaxy S21",
+          //   "issue": "Screen Repair",
+          //   "price": "149",
+          //   "time": "1.5 hours"
+          // }]
+          //   this.buildTreeData()
+
+      },
+      methods: {
+        // 初始化树形数据
+        buildTreeData() {
+          const brandMap = {}
+          this.idSeed = 1
+          this.rawData.forEach(item => {
+            if (!brandMap[item.brand]) {
+              brandMap[item.brand] = {
+                id: this.idSeed++, level: 1, name: item.brand, editStatus: false, children: []
+              }
+            }
+            const brand = brandMap[item.brand]
+            let model = brand.children.find(c => c.name === item.model)
+            if (!model) {
+              model = { id: this.idSeed++, level: 2, name: item.model, editStatus: false, children: [] }
+              brand.children.push(model)
+            }
+            model.children.push({
+              id: this.idSeed++, level: 3, name: item.issue, price: item.price, time: item.time,
+              editStatus: false, sort: 0
+            })
+          })
+          this.tableData = Object.values(brandMap)
+        },
+
+        // ========== 核心：无弹窗 新增功能 ==========
+        // 新增 一级品牌（顶部按钮）
+        addTopLevel() {
+          this.closeAllEdit()
+          const newNode = {
+            id: this.idSeed++,
+            level: 1,
+            name: '',
+            editStatus: true,
+            children: []
+          }
+          this.tableData.unshift(newNode)
+        },
+
+        // 新增子节点（型号/项目）
+        addChild(parentRow) {
+          this.closeAllEdit()
+          let newNode = {}
+          if (parentRow.level === 1) {
+            // 新增二级型号
+            newNode = {
+              id: this.idSeed++,
+              level: 2,
+              name: '',
+              editStatus: true,
+              children: []
+            }
+          } else if (parentRow.level === 2) {
+            // 新增三级项目
+            newNode = {
+              id: this.idSeed++,
+              level: 3,
+              name: '',
+              price: '',
+              time: '30 minutes',
+              editStatus: true,
+              sort: 0
+            }
+          }
+          parentRow.children.push(newNode)
+          this.$set(parentRow, 'children', parentRow.children)
+        },
+
+        // ========== 编辑/新增 统一保存 ==========
+        saveEditOrAdd(row) {
+          if (!row.name.trim()) {
+            this.$message.warning('名称不能为空！')
+            return
+          }
+          row.editStatus = false
+          this.syncAllRawData()
+          this.$message.success('保存成功！')
+        },
+
+        // ========== 原有编辑功能 ==========
+        startEdit(row) {
+          this.closeAllEdit()
+          this.$set(row, 'editStatus', true)
+        },
+        closeAllEdit() {
+          const traverse = (nodes) => {
+            nodes.forEach(node => {
+              node.editStatus = false
+              if (node.children) traverse(node.children)
+            })
+          }
+          traverse(this.tableData)
+        },
+        edit(row) { this.startEdit(row) },
+
+        // ========== 数据同步 ==========
+        syncAllRawData() {
+          this.convertTreeToRaw()
+          this.rawData = [...this.rawDataResult]
+        },
+        convertTreeToRaw() {
+          const result = []
+          // 递归遍历，携带父级信息
+          const traverse = (node, parentBrand = null, parentModel = null) => {
+            if (node.level === 3) {
+              result.push({
+                brand: parentBrand,
+                model: parentModel,
+                issue: node.name,
+                price: node.price,
+                time: node.time
+              })
+              return
+            }
+            if (!node.children) return
+
+            node.children.forEach(child => {
+              const newBrand = node.level === 1 ? node.name : parentBrand
+              const newModel = node.level === 2 ? node.name : parentModel
+              traverse(child, newBrand, newModel)
+            })
+          }
+          this.tableData.forEach(root => traverse(root))
+          this.rawDataResult = result
+        },
+
+        // ========== 删除功能 ==========
+        handleSelectionChange(val) { this.selectedRows = val },
+        deleteData() {
+          if (!this.selectedRows.length) return this.$message.warning('请选择')
+          this.$confirm('确认删除？').then(() => {
+            this.selectedRows.forEach(row => this.deleteRow(row))
+            this.syncAllRawData()
+            this.$refs.table.clearSelection()
+            this.$message.success('删除成功')
+          })
+        },
+        deleteRow(row) {
+          const del = (list) => {
+            const idx = list.findIndex(i => i.id === row.id)
+            if (idx > -1) return list.splice(idx, 1)
+            list.forEach(i => i.children && del(i.children))
+          }
+          del(this.tableData)
+        },
+        openDialog() { },
+   
+    // 修复1：改为普通函数，保证this指向Vue实例
+    pushGit: async function() {
+      const user = "987625922"
+      const repo = "987625922.github.io"
+      this.convertTreeToRaw()
+      await this.handleCopy()
+      const url = `https://github.com/${user}/${repo}/edit/main/data.json`
+      window.open(url, '_blank')
+    },
+    
+    // 修复2：改为普通函数，修正变量访问方式
+    handleCopy: async function() {
+      try {
+        // 修复：通过this访问rawDataResult，并转为字符串
+        await navigator.clipboard.writeText(JSON.stringify(this.rawDataResult))
+        // 修复：通过this访问copySuccess
+        this.copySuccess = true
+        setTimeout(() => {
+          this.copySuccess = false
+        }, 2000)
+        this.$message.success('复制成功！') // 替换alert为ElementUI提示
+      } catch (err) {
+        console.error('复制失败：', err)
+        this.$message.error('复制失败，请手动复制')
+      }
+        }
+      }
+    })
+  </script>
+</body>
+
+</html>
